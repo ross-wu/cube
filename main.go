@@ -23,7 +23,7 @@ const (
 	Blue
 	Yellow
 	Orange
-	WrongColor
+	Unknown
 
 	FaceTop    = "top"
 	FaceLeft   = "left"
@@ -36,17 +36,90 @@ const (
 var (
 	faceNames = []string{FaceTop, FaceLeft, FaceFront, FaceRight, FaceBack, FaceBottom}
 	colors    = map[Color]string{
-		White:  "\033[37m",
-		Red:    "\033[31m",
-		Green:  "\033[32m",
-		Blue:   "\033[34m",
-		Yellow: "\033[33m",
-		Orange: "\033[1;31m",
+		White:   "\033[37m",
+		Red:     "\033[31m",
+		Green:   "\033[32m",
+		Blue:    "\033[34m",
+		Yellow:  "\033[33m",
+		Orange:  "\033[1;31m",
+		Unknown: "\033[30m",
 	}
 )
 
 type Face struct {
 	Pieces [9]Color
+}
+
+type Cube struct {
+	faces map[string]*Face
+}
+
+func NewCube() *Cube {
+	return &Cube{faces: map[string]*Face{}}
+}
+
+func rotateClock(f *Face) {
+	// Move corners.
+	saved := f.Pieces[0]
+	f.Pieces[0] = f.Pieces[6]
+	f.Pieces[6] = f.Pieces[8]
+	f.Pieces[8] = f.Pieces[2]
+	f.Pieces[2] = saved
+
+	// Move edges.
+	saved = f.Pieces[1]
+	f.Pieces[1] = f.Pieces[3]
+	f.Pieces[3] = f.Pieces[7]
+	f.Pieces[7] = f.Pieces[5]
+	f.Pieces[5] = saved
+}
+
+func rotateCounterclock(f *Face) {
+	// Move corners.
+	saved := f.Pieces[0]
+	f.Pieces[0] = f.Pieces[2]
+	f.Pieces[2] = f.Pieces[8]
+	f.Pieces[8] = f.Pieces[6]
+	f.Pieces[6] = saved
+
+	// Move edges.
+	saved = f.Pieces[1]
+	f.Pieces[1] = f.Pieces[5]
+	f.Pieces[5] = f.Pieces[7]
+	f.Pieces[7] = f.Pieces[3]
+	f.Pieces[3] = saved
+}
+
+// Flip flips the cube bottom->front->top->back.
+func (c *Cube) Flip() {
+	// Rotate bottom, front, top and back.
+	last := FaceTop
+	saved := c.faces[FaceTop]
+	for _, name := range []string{FaceFront, FaceBottom, FaceBottom, FaceBack} {
+		c.faces[last] = c.faces[name]
+		last = name
+	}
+	c.faces[FaceBack] = saved
+
+	rotateClock(c.faces[FaceRight])
+	rotateCounterclock(c.faces[FaceLeft])
+}
+
+// D performs a "down" movement.
+func (c *Cube) D() {
+}
+
+// DD performs "down" movement twice.
+func (c *Cube) DD() {
+}
+
+// D_ performs a counterclockwise "down" movement.
+func (c *Cube) D_() {
+
+}
+
+func (c *Cube) SetFace(name string, face *Face) {
+	c.faces[name] = face
 }
 
 func printColor(color Color) {
@@ -68,7 +141,7 @@ func printRow(face *Face, row int) {
 	}
 }
 
-func printCube(faces map[string]*Face) {
+func (c *Cube) Print() {
 	const indent = "         "
 
 	fmt.Printf("\t         ┌────────┐\n")
@@ -76,7 +149,7 @@ func printCube(faces map[string]*Face) {
 	// Print top face.
 	for row := 0; row < 3; row++ {
 		fmt.Printf("\t%s", indent)
-		printRow(faces[FaceTop], row)
+		printRow(c.faces[FaceTop], row)
 		fmt.Printf("│\n")
 	}
 
@@ -85,10 +158,10 @@ func printCube(faces map[string]*Face) {
 	// Print left, front, right and back faces
 	for row := 0; row < 3; row++ {
 		fmt.Printf("\t")
-		printRow(faces[FaceLeft], row)
-		printRow(faces[FaceFront], row)
-		printRow(faces[FaceRight], row)
-		printRow(faces[FaceBack], row)
+		printRow(c.faces[FaceLeft], row)
+		printRow(c.faces[FaceFront], row)
+		printRow(c.faces[FaceRight], row)
+		printRow(c.faces[FaceBack], row)
 		fmt.Printf("│\n")
 	}
 
@@ -97,7 +170,7 @@ func printCube(faces map[string]*Face) {
 	// Print bottom face.
 	for row := 0; row < 3; row++ {
 		fmt.Printf("\t%s", indent)
-		printRow(faces[FaceBottom], row)
+		printRow(c.faces[FaceBottom], row)
 		fmt.Printf("│\n")
 	}
 
@@ -120,7 +193,7 @@ func parseField(s string) Color {
 	case "Orange", "o":
 		return Orange
 	}
-	return WrongColor
+	return Unknown
 }
 
 func readFace(faceName string, reader *bufio.Reader) *Face {
@@ -140,9 +213,6 @@ func readFace(faceName string, reader *bufio.Reader) *Face {
 				break
 			}
 			face.Pieces[i] = parseField(s)
-			if face.Pieces[i] == WrongColor {
-				fmt.Printf("WARNING: wrong color %s for piece %d, skip.", s, i)
-			}
 			i++
 		}
 		if i < 9 {
@@ -159,13 +229,17 @@ func main() {
 	fmt.Println("Colors are: White Red Green Blue Yellow Orange, or w r g b y o.")
 	fmt.Println("(input 9 whitespace-separated colors for each face):")
 
-	faces := map[string]*Face{}
+	c := NewCube()
 	reader := bufio.NewReader(os.Stdin)
 	for _, faceName := range faceNames {
-		faces[faceName] = readFace(faceName, reader)
+		c.SetFace(faceName, readFace(faceName, reader))
 	}
 
-	fmt.Printf("\n\nInput:\n")
-	printCube(faces)
+	fmt.Printf("\n\nINPUT:\n")
+	c.Print()
 
+	fmt.Println("------------------------------------------------------")
+	fmt.Printf("OUTPUT:\n")
+	c.Flip()
+	c.Print()
 }
