@@ -9,11 +9,13 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"strings"
 )
 
 var (
 	port      = flag.Int("port", 8080, "http server port")
+	kociemba  = flag.String("kociemba", "./kociemba/bin/kociemba", "Path to the Kociemba's Rubik's Cube solver binary.")
 	initMoves = flag.String("init_move", "", "Comma-separated initial moves, for test only.")
 )
 
@@ -39,7 +41,15 @@ const (
 
 var (
 	faceNames = []string{Top, Left, Front, Right, Back, Bottom}
-	colors    = map[Color]string{
+	faceCode  = map[string]byte{
+		Top:    'U',
+		Left:   'L',
+		Front:  'F',
+		Right:  'R',
+		Back:   'B',
+		Bottom: 'D',
+	}
+	colors = map[Color]string{
 		White:   "\033[37m",
 		Red:     "\033[31m",
 		Green:   "\033[32m",
@@ -60,7 +70,8 @@ var (
 		Right: Back,
 		Back:  Left,
 	}
-	topNeighbor = map[string]string{}
+	topNeighbor    = map[string]string{}
+	bottomNeighbor = map[string]string{}
 )
 
 type Face struct {
@@ -77,28 +88,22 @@ type Cube struct {
 	calibs map[string]string
 }
 
+func (c *Cube) kociembaScramble() string {
+	colorToCode := map[Color]byte{}
+	for name, face := range c.faces {
+		colorToCode[face.Pieces[4]] = faceCode[name]
+	}
+	buf := make([]byte, 0, 55)
+	for _, name := range []string{Top, Right, Front, Bottom, Left, Back} {
+		for _, color := range c.faces[name].Pieces {
+			buf = append(buf, colorToCode[color])
+		}
+	}
+	return string(buf)
+}
+
 func (c *Cube) Face(name string) *Face {
-	return faces[calibs[name]]
-}
-
-func (c *Cube) leftColor(name string, i int) Color {
-	neighbor := leftNeighbor[name]
-	return c.faces[neighbor].Pieces[i+2]
-}
-
-func (c *Cube) rightColor(name string, i int) Color {
-	neighbor := rightNeighbor[name]
-	return c.faces[neighbor].Pieces[i-2]
-}
-
-func (c *Cube) topColor(name string, i int) Color {
-	neighbor := topNeighbor[name]
-	return c.faces[neighbor].Pieces[i+6]
-}
-
-func (c *Cube) bottomColor(name string, i int) Color {
-	neighbor := bottomNeighbor[name]
-	return c.faces[neighbor].Pieces[i-6]
+	return c.faces[c.calibs[name]]
 }
 
 func rotateClock(f *Face) {
@@ -424,14 +429,15 @@ func readFace(faceName string, reader *bufio.Reader) *Face {
 	return face
 }
 
-func solveWhiteEdges(c *Cube) int {
-
-}
-
-func solve(c *Cube) int {
-	n := solveWhiteEdges(c)
-
-	return n
+func solve(c *Cube) []string {
+	s := c.kociembaScramble()
+	log.Printf("INFO: exec: %s %s", *kociemba, s)
+	out, err := exec.Command(*kociemba, s).Output()
+	if err != nil {
+		log.Printf("ERROR: failed to run %q: %v", *kociemba, err)
+		os.Exit(255)
+	}
+	return strings.Split(string(out), " ")
 }
 
 func main() {
@@ -459,7 +465,7 @@ func main() {
 		c.Print()
 	}
 
-	n := solve(c)
+	steps := solve(c)
 	fmt.Println("------------------------------------------------------")
-	fmt.Printf("SOLUTION: total steps: %d\n", n)
+	fmt.Printf("SOLUTION: total steps: %d: %s\n", len(steps), strings.Join(steps, " "))
 }
