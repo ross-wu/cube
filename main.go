@@ -1,4 +1,6 @@
 // This binary is a Rubik's cube resolver.
+// Algorithm and move notations are described in
+// https://cube3x3.com/how-to-solve-a-rubiks-cube/
 package main
 
 import (
@@ -11,10 +13,12 @@ import (
 )
 
 var (
-	port = flag.Int("port", 8080, "http server port")
+	port      = flag.Int("port", 8080, "http server port")
+	initMoves = flag.String("init_move", "", "Comma-separated initial moves, for test only.")
 )
 
 type Color int
+type Move string
 
 const (
 	White Color = iota
@@ -25,16 +29,16 @@ const (
 	Orange
 	Unknown
 
-	FaceTop    = "top"
-	FaceLeft   = "left"
-	FaceFront  = "front"
-	FaceRight  = "right"
-	FaceBack   = "back"
-	FaceBottom = "bottom"
+	Top    = "top"
+	Left   = "left"
+	Front  = "front"
+	Right  = "right"
+	Back   = "back"
+	Bottom = "bottom"
 )
 
 var (
-	faceNames = []string{FaceTop, FaceLeft, FaceFront, FaceRight, FaceBack, FaceBottom}
+	faceNames = []string{Top, Left, Front, Right, Back, Bottom}
 	colors    = map[Color]string{
 		White:   "\033[37m",
 		Red:     "\033[31m",
@@ -44,6 +48,19 @@ var (
 		Orange:  "\033[1;31m",
 		Unknown: "\033[30m",
 	}
+	leftNeighbor = map[string]string{
+		Left:  Back,
+		Front: Left,
+		Right: Front,
+		Back:  Right,
+	}
+	rightNeighbor = map[string]string{
+		Left:  Front,
+		Front: Right,
+		Right: Back,
+		Back:  Left,
+	}
+	topNeighbor = map[string]string{}
 )
 
 type Face struct {
@@ -52,10 +69,36 @@ type Face struct {
 
 type Cube struct {
 	faces map[string]*Face
+	moves map[string]func(*Cube) int
+
+	// When flip or turn cube, the real faces change positions, but to apply the
+	// solving algoritm, I'll the virual cube steady, so use var calibs to keep
+	// the mapping between virtual face to the real face.
+	calibs map[string]string
 }
 
-func NewCube() *Cube {
-	return &Cube{faces: map[string]*Face{}}
+func (c *Cube) Face(name string) *Face {
+	return faces[calibs[name]]
+}
+
+func (c *Cube) leftColor(name string, i int) Color {
+	neighbor := leftNeighbor[name]
+	return c.faces[neighbor].Pieces[i+2]
+}
+
+func (c *Cube) rightColor(name string, i int) Color {
+	neighbor := rightNeighbor[name]
+	return c.faces[neighbor].Pieces[i-2]
+}
+
+func (c *Cube) topColor(name string, i int) Color {
+	neighbor := topNeighbor[name]
+	return c.faces[neighbor].Pieces[i+6]
+}
+
+func (c *Cube) bottomColor(name string, i int) Color {
+	neighbor := bottomNeighbor[name]
+	return c.faces[neighbor].Pieces[i-6]
 }
 
 func rotateClock(f *Face) {
@@ -90,32 +133,191 @@ func rotateCounterclock(f *Face) {
 	f.Pieces[3] = saved
 }
 
-// Flip flips the cube bottom->front->top->back.
-func (c *Cube) Flip() {
-	// Rotate bottom, front, top and back.
-	last := FaceTop
-	saved := c.faces[FaceTop]
-	for _, name := range []string{FaceFront, FaceBottom, FaceBottom, FaceBack} {
+// flips the cube bottom->front->top->back->bottom.
+func (c *Cube) flip() *Cube {
+	last := Top
+	saved := c.faces[Top]
+	for _, name := range []string{Front, Bottom, Bottom, Back} {
 		c.faces[last] = c.faces[name]
 		last = name
 	}
-	c.faces[FaceBack] = saved
+	c.faces[Back] = saved
 
-	rotateClock(c.faces[FaceRight])
-	rotateCounterclock(c.faces[FaceLeft])
+	rotateClock(c.faces[Right])
+	rotateCounterclock(c.faces[Left])
+
+	c.calibs[Top] = Back
+	c.calibs[Back] = Bottom
+	c.calibs[Bottom] = Front
+	c.calibs[Front] = Top
+	return c
 }
 
-// D performs a "down" movement.
-func (c *Cube) D() {
+func (c *Cube) reverseFlip() *Cube {
+	return c.flip().flip().flip()
 }
 
-// DD performs "down" movement twice.
-func (c *Cube) DD() {
+// turns the cube front->left->back->right->front.
+func (c *Cube) turn(n int) *Cube {
+	for i := 0; i < n; i++ {
+		last := Left
+		saved := c.faces[Left]
+		for _, name := range []string{Left, Front, Right, Back} {
+			c.faces[last] = c.faces[name]
+			last = name
+		}
+		c.faces[Back] = saved
+
+		rotateClock(c.faces[Top])
+		rotateCounterclock(c.faces[Bottom])
+
+		c.calibs[Front] = Left
+		c.calibs[Left] = Back
+		c.calibs[Back] = Right
+		c.calibs[Right] = Front
+	}
+	return c
 }
 
-// D_ performs a counterclockwise "down" movement.
-func (c *Cube) D_() {
+func (c *Cube) reverseTurn() *Cube {
+	return c.turn(3)
+}
 
+// D performs a D move on the cube.
+func (c *Cube) D() *Cube {
+	last := Left
+	left := c.faces[Left].Pieces
+	saved := [3]Color{left[6], left[7], left[8]}
+	for _, cur := range []string{Front, Right, Back} {
+		for i := 6; i < 9; i++ {
+			c.faces[last].Pieces[i] = c.faces[cur].Pieces[i]
+		}
+		last = cur
+	}
+	for i := 0; i < 3; i++ {
+		c.faces[last].Pieces[i+6] = saved[i]
+	}
+
+	rotateClock(c.faces[Bottom])
+	return c
+}
+
+func (c *Cube) D2() *Cube {
+	return c.D().D()
+}
+
+func (c *Cube) d() *Cube {
+	return c.D().D().D()
+}
+
+func newMoves() map[string]func(*Cube) int {
+	// Basic moves.
+	m := map[string]func(*Cube) int{
+		"D": func(c *Cube) int {
+			c.D()
+			return 1
+		},
+		"D2": func(c *Cube) int {
+			c.D().D()
+			return 1
+		},
+		"D'": func(c *Cube) int {
+			c.d()
+			return 1
+		},
+
+		"B": func(c *Cube) int {
+			c.flip().D()
+			return 2
+		},
+		"B2": func(c *Cube) int {
+			c.flip().D2()
+			return 2
+		},
+		"B'": func(c *Cube) int {
+			c.flip().d()
+			return 2
+		},
+
+		"U": func(c *Cube) int {
+			c.flip().flip().D()
+			return 3
+		},
+		"U2": func(c *Cube) int {
+			c.flip().flip().D2()
+			return 3
+		},
+		"U'": func(c *Cube) int {
+			c.flip().flip().d()
+			return 3
+		},
+
+		"L": func(c *Cube) int {
+			c.turn(1).flip().D()
+			return 3
+		},
+		"L2": func(c *Cube) int {
+			c.turn(1).flip().D2()
+			return 3
+		},
+		"L'": func(c *Cube) int {
+			c.turn(1).flip().d()
+			return 3
+		},
+
+		"R": func(c *Cube) int {
+			c.reverseTurn().flip().D()
+			return 3
+		},
+		"R2": func(c *Cube) int {
+			c.reverseTurn().flip().D2()
+			return 3
+		},
+		"R'": func(c *Cube) int {
+			c.reverseTurn().flip().d()
+			return 3
+		},
+
+		"F": func(c *Cube) int {
+			c.turn(2).flip().D()
+			return 3
+		},
+		"F2": func(c *Cube) int {
+			c.turn(2).flip().D2()
+			return 3
+		},
+		"F'": func(c *Cube) int {
+			c.turn(2).flip().d()
+			return 3
+		},
+	}
+
+	return m
+}
+
+func NewCube() *Cube {
+	return &Cube{
+		faces: map[string]*Face{},
+		moves: newMoves(),
+		calibs: map[string]string{
+			Top:    Top,
+			Left:   Left,
+			Front:  Front,
+			Right:  Right,
+			Back:   Back,
+			Bottom: Bottom,
+		},
+	}
+}
+
+// Rotate rotates cube fase according to the given move.
+func (c *Cube) Rotate(m Move) error {
+	op, ok := c.moves[string(m)]
+	if !ok {
+		return fmt.Errorf("no such move: %s", m)
+	}
+	op(c)
+	return nil
 }
 
 func (c *Cube) SetFace(name string, face *Face) {
@@ -149,7 +351,7 @@ func (c *Cube) Print() {
 	// Print top face.
 	for row := 0; row < 3; row++ {
 		fmt.Printf("\t%s", indent)
-		printRow(c.faces[FaceTop], row)
+		printRow(c.faces[Top], row)
 		fmt.Printf("│\n")
 	}
 
@@ -158,10 +360,10 @@ func (c *Cube) Print() {
 	// Print left, front, right and back faces
 	for row := 0; row < 3; row++ {
 		fmt.Printf("\t")
-		printRow(c.faces[FaceLeft], row)
-		printRow(c.faces[FaceFront], row)
-		printRow(c.faces[FaceRight], row)
-		printRow(c.faces[FaceBack], row)
+		printRow(c.faces[Left], row)
+		printRow(c.faces[Front], row)
+		printRow(c.faces[Right], row)
+		printRow(c.faces[Back], row)
 		fmt.Printf("│\n")
 	}
 
@@ -170,7 +372,7 @@ func (c *Cube) Print() {
 	// Print bottom face.
 	for row := 0; row < 3; row++ {
 		fmt.Printf("\t%s", indent)
-		printRow(c.faces[FaceBottom], row)
+		printRow(c.faces[Bottom], row)
 		fmt.Printf("│\n")
 	}
 
@@ -222,6 +424,16 @@ func readFace(faceName string, reader *bufio.Reader) *Face {
 	return face
 }
 
+func solveWhiteEdges(c *Cube) int {
+
+}
+
+func solve(c *Cube) int {
+	n := solveWhiteEdges(c)
+
+	return n
+}
+
 func main() {
 	flag.Parse()
 
@@ -238,8 +450,16 @@ func main() {
 	fmt.Printf("\n\nINPUT:\n")
 	c.Print()
 
+	if len(*initMoves) > 0 {
+		for _, m := range strings.Split(*initMoves, ",") {
+			c.Rotate(Move(m))
+		}
+		fmt.Println("------------------------------------------------------")
+		fmt.Printf("AFTER INITIAL MOVES:\n")
+		c.Print()
+	}
+
+	n := solve(c)
 	fmt.Println("------------------------------------------------------")
-	fmt.Printf("OUTPUT:\n")
-	c.Flip()
-	c.Print()
+	fmt.Printf("SOLUTION: total steps: %d\n", n)
 }
