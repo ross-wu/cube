@@ -524,7 +524,7 @@ func httpCube(w http.ResponseWriter, req *http.Request) {
 		}
 		c.SetFace(code, face)
 	}
-	fmt.Print("Input cube:")
+	fmt.Println("Input cube:")
 	c.Print()
 
 	steps := solve(c)
