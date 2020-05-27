@@ -1,24 +1,30 @@
-// This binary is a Rubik's cube resolver.
-// Algorithm and move notations are described in
+// This binary is a Rubik's cube resolver server.
+//
+// Usage:
+//   $ ./server
+//   then, in brower:
+//     http://localhost/cube?U=yyoyygbwo&L=ggwooboob&F=rrwybwyoo&R=brgbrgyrg&B=wrrwgywoy&D=rbbgwbgwr
+//
+// The algorithm and move notations are described in
 // https://cube3x3.com/how-to-solve-a-rubiks-cube/
+//
 package main
 
 import (
-	"bufio"
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"strings"
 )
 
 var (
-	port      = flag.Int("port", 8080, "http server port")
-	kociemba  = flag.String("kociemba", "./kociemba/bin/kociemba", "Path to the Kociemba's Rubik's Cube solver binary.")
-	initMoves = flag.String("init_move", "", "Comma-separated initial moves, for test only.")
-	verbose   = flag.Bool("v", false, "Print the cube for each step.")
-	debug     = flag.Bool("debug", false, "debug mode.")
+	port     = flag.Int("port", 80, "http server port")
+	kociemba = flag.String("kociemba", "./kociemba/bin/kociemba", "Path to the Kociemba's Rubik's Cube solver binary.")
+	verbose  = flag.Bool("v", false, "Print the cube for each step.")
+	debug    = flag.Bool("debug", false, "debug mode.")
 )
 
 type Color int
@@ -465,30 +471,22 @@ func parseField(s string) Color {
 	return Unknown
 }
 
-func readFace(faceName string, reader *bufio.Reader) *Face {
-	fmt.Printf("\n  %s: ", faceName)
-
+func readFace(faceName, line string) (*Face, error) {
 	face := &Face{}
 	i := 0
-	for i < 9 {
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			log.Printf("ERROR: ReadString error: %v", err)
-			os.Exit(1)
+	for _, b := range line {
+		s := fmt.Sprintf("%c", b)
+		face.Pieces[i] = parseField(s)
+		if face.Pieces[i] == Unknown {
+			return nil, fmt.Errorf("unknown color name: %s", s)
 		}
-		for _, s := range strings.Fields(line) {
-			if i == 9 {
-				fmt.Println("WARNING: read 9 pieces already, discards rest of the input line.")
-				break
-			}
-			face.Pieces[i] = parseField(s)
-			i++
-		}
-		if i < 9 {
-			fmt.Printf("%d remain> ", 9-i)
-		}
+		i++
 	}
-	return face
+	if i < 9 {
+		return nil, fmt.Errorf("face string must contain 9 chars, but only had %d", 9-i)
+	}
+	log.Printf("readFace %s ok.", faceName)
+	return face, nil
 }
 
 func solve(c *Cube) []string {
@@ -502,6 +500,49 @@ func solve(c *Cube) []string {
 	return strings.Split(strings.TrimSpace(string(out)), " ")
 }
 
+func httpCube(w http.ResponseWriter, req *http.Request) {
+	req.ParseForm()
+	log.Printf("%s: %s %s", req.RemoteAddr, req.Method, req.URL.Path)
+
+	c := NewCube()
+	for _, code := range []byte{Up, Left, Front, Right, Back, Down} {
+		k := fmt.Sprintf("%c", code)
+		v := req.FormValue(k)
+		if len(v) != 9 {
+			log.Printf("ERROR: invalid arg %s=%s", k, v)
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(fmt.Sprintf(`face %s must contain only [wrboyg], and must be 9 chars.`, k)))
+			return
+		}
+		face, err := readFace(k, v)
+		if err != nil {
+			msg := fmt.Sprintf("ERROR: readFace(%s, %s) error: %v", k, v, err)
+			log.Print(msg)
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(msg))
+			return
+		}
+		c.SetFace(code, face)
+	}
+	fmt.Print("Input cube:")
+	c.Print()
+
+	steps := solve(c)
+	solution := fmt.Sprintf("step=%d: %s", len(steps), strings.Join(steps, " "))
+	fmt.Printf("SOLUTION: %s\n", solution)
+	w.Write([]byte(fmt.Sprintf("OK: %s", solution)))
+
+	if err := c.Apply(steps, *verbose); err != nil {
+		fmt.Printf("ERROR: Apply(%v) error: %v", steps, err)
+		return
+	}
+	if !*verbose {
+		c.Print()
+	}
+
+	log.Printf("SUCCEEDED: %s", solution)
+}
+
 func main() {
 	flag.Parse()
 
@@ -513,38 +554,8 @@ func main() {
 		*verbose = true
 	}
 
-	c := NewCube()
-	reader := bufio.NewReader(os.Stdin)
-	for _, code := range faceCodes {
-		c.SetFace(code, readFace(FaceName(code), reader))
-	}
+	http.HandleFunc("/cube", httpCube)
 
-	fmt.Printf("\n\nINPUT:\n")
-	c.Print()
-
-	if len(*initMoves) > 0 {
-		fmt.Println("------------------------------------------------------")
-		fmt.Printf("INITIAL MOVES:\n")
-		for _, m := range strings.Split(*initMoves, ",") {
-			fmt.Printf("\nmove=%s (->%s):\n", m, c.Calib(Move(m)))
-			fmt.Printf("calibs: %s\n", c.CalibsDebugString())
-			c.Rotate(Move(m))
-			c.Print()
-		}
-		os.Exit(0)
-	}
-
-	steps := solve(c)
-	fmt.Println("------------------------------------------------------")
-	fmt.Printf("SOLUTION: step=%d: %s\n", len(steps), strings.Join(steps, " "))
-
-	if err := c.Apply(steps, *verbose); err != nil {
-		fmt.Printf("ERROR: Apply(%v) error: %v", steps, err)
-		os.Exit(255)
-	}
-	if !*verbose {
-		c.Print()
-	}
-
-	fmt.Printf("\nDONE\n")
+	log.Printf("Starting http server on port %d", *port)
+	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", *port), nil))
 }

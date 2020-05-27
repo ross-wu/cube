@@ -21,7 +21,7 @@ $ ./bin/kociemba DRLUUBFBRBLURRLRUBLRDDFDLFUFUFFDBRDUBRUFLLFDDBFLUBLRBD
 ### Step 2. Build the LEGO ev3 solver
 
 ```
-$ go build main.go
+$ go build server.go
 ```
 
 #### Usage:
@@ -29,18 +29,34 @@ $ go build main.go
 **Simple usage**
 
 ```
-$ cat in.1 | ./main
+$ ./server
 ```
 
-**Step-by-step output**
+then in brower:
+http://localhost/cube?U=wwwwwwwww&L=ggggggggg&F=bbbbbbbbb&R=ooooooooo&B=rrrrrrrrr&D=yyyyyyyyy
+
+
+More examples:
+
+  * http://localhost/cube?U=wwwwwwwww&L=ggggggggg&F=bbbbbbbbb&R=ooooooooo&B=rrrrrrrrr&D=yyyyyyyyy
+  * http://localhost/cube?U=bwwbyryyr&L=wrrrgyyoo&F=ggboobygy&R=wygwbyoro&B=roobrgwwb&D=bogbwwrgg
+  * http://localhost/cube?U=yyoyygbwo&L=ggwooboob&F=rrwybwyoo&R=brgbrgyrg&B=wrrwgywoy&D=rbbgwbgwr
+
+**Set http port**
 
 ```
-$ cat demo.in | ./main -v
+$ ./server --port=8080
+```
+
+**Step-by-step**
+
+```
+$ ./server -v
 ```
 
 **Step-by-step w/ debug info**
 
 ```
-$ cat demo.in |./main --debug
+$ ./server --debug
 ```
 
