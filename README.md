@@ -60,3 +60,15 @@ $ ./server -v
 $ ./server --debug
 ```
 
+**Run the solver client on EV3**
+
+```
+$ ./lego_cube --server=<server_address> --input='<Up> <Left> <Front> <Right> <Back> <Down>'
+```
+
+E.g.:
+
+```
+$ ./lego_cube --server=169.254.60.8 \
+  --input='wrygoroog bybrgooor ybygwybww rbgrbyrwb owrbygwwg yggyrbwoo'
+```

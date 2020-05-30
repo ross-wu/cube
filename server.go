@@ -45,6 +45,14 @@ const (
 	Right byte = 'R'
 	Back  byte = 'B'
 	Down  byte = 'D'
+
+	MoveFlip  = "flip"
+	MoveTurn1 = "turn"
+	MoveTurn2 = "turn2"
+	MoveRTurn = "turn'"
+	MoveD     = "D"
+	MoveD2    = "D2"
+	Moved     = "D'"
 )
 
 var (
@@ -84,7 +92,7 @@ func FaceName(code byte) string {
 
 type Cube struct {
 	faces map[byte]*Face
-	moves map[Move]func(*Cube) int
+	moves map[Move]func(*Cube) []string
 
 	// When flip or turn cube, the real faces change positions, but to apply the
 	// solving algoritm, I'll let the virual cube steady, so use var calibs to keep
@@ -232,85 +240,85 @@ func (c *Cube) d() *Cube {
 	return c.D().D().D()
 }
 
-func newMoves() map[Move]func(*Cube) int {
+func newMoves() map[Move]func(*Cube) []string {
 	// Basic moves.
-	m := map[Move]func(*Cube) int{
-		"D": func(c *Cube) int {
+	m := map[Move]func(*Cube) []string{
+		"D": func(c *Cube) []string {
 			c.D()
-			return 1
+			return []string{MoveD}
 		},
-		"D2": func(c *Cube) int {
+		"D2": func(c *Cube) []string {
 			c.D().D()
-			return 1
+			return []string{MoveD2}
 		},
-		"D'": func(c *Cube) int {
+		"D'": func(c *Cube) []string {
 			c.d()
-			return 1
+			return []string{Moved}
 		},
 
-		"B": func(c *Cube) int {
+		"B": func(c *Cube) []string {
 			c.flip().D()
-			return 2
+			return []string{MoveFlip, MoveD}
 		},
-		"B2": func(c *Cube) int {
+		"B2": func(c *Cube) []string {
 			c.flip().D2()
-			return 2
+			return []string{MoveFlip, MoveD2}
 		},
-		"B'": func(c *Cube) int {
+		"B'": func(c *Cube) []string {
 			c.flip().d()
-			return 2
+			return []string{MoveFlip, Moved}
 		},
 
-		"U": func(c *Cube) int {
+		"U": func(c *Cube) []string {
 			c.flip().flip().D()
-			return 3
+			return []string{MoveFlip, MoveFlip, MoveD}
 		},
-		"U2": func(c *Cube) int {
+		"U2": func(c *Cube) []string {
 			c.flip().flip().D2()
-			return 3
+			return []string{MoveFlip, MoveFlip, MoveD2}
 		},
-		"U'": func(c *Cube) int {
+		"U'": func(c *Cube) []string {
 			c.flip().flip().d()
-			return 3
+			return []string{MoveFlip, MoveFlip, Moved}
 		},
 
-		"L": func(c *Cube) int {
+		"L": func(c *Cube) []string {
 			c.turn(1).flip().D()
-			return 3
+			return []string{MoveTurn1, MoveFlip, MoveD}
 		},
-		"L2": func(c *Cube) int {
+		"L2": func(c *Cube) []string {
 			c.turn(1).flip().D2()
-			return 3
+			return []string{MoveTurn1, MoveFlip, MoveD2}
 		},
-		"L'": func(c *Cube) int {
+		"L'": func(c *Cube) []string {
 			c.turn(1).flip().d()
-			return 3
+			return []string{MoveTurn1, MoveFlip, Moved}
 		},
 
-		"R": func(c *Cube) int {
+		"R": func(c *Cube) []string {
 			c.reverseTurn().flip().D()
-			return 3
+			return []string{MoveRTurn, MoveFlip, MoveD}
 		},
-		"R2": func(c *Cube) int {
+		"R2": func(c *Cube) []string {
 			c.reverseTurn().flip().D2()
-			return 3
+			return []string{MoveRTurn, MoveFlip, MoveD2}
 		},
-		"R'": func(c *Cube) int {
+		"R'": func(c *Cube) []string {
 			c.reverseTurn().flip().d()
-			return 3
+			return []string{MoveRTurn, MoveFlip, Moved}
 		},
 
-		"F": func(c *Cube) int {
+		"F": func(c *Cube) []string {
 			c.turn(2).flip().D()
-			return 3
+			return []string{MoveTurn2, MoveFlip, MoveD}
 		},
-		"F2": func(c *Cube) int {
+		"F2": func(c *Cube) []string {
 			c.turn(2).flip().D2()
-			return 3
+			return []string{MoveTurn2, MoveFlip, MoveD2}
 		},
-		"F'": func(c *Cube) int {
+		"F'": func(c *Cube) []string {
 			c.turn(2).flip().d()
-			return 3
+			return []string{MoveTurn2, MoveFlip, Moved}
 		},
 	}
 
@@ -339,13 +347,12 @@ func (c *Cube) Calib(old Move) Move {
 }
 
 // Rotate rotates cube fase according to the given move. The move should be the virtual face.
-func (c *Cube) Rotate(m Move) error {
+func (c *Cube) Rotate(m Move) ([]string, error) {
 	op, ok := c.moves[c.Calib(m)]
 	if !ok {
-		return fmt.Errorf("no such move: %s", m)
+		return nil, fmt.Errorf("no such move: %s", m)
 	}
-	op(c)
-	return nil
+	return op(c), nil
 }
 
 func (c *Cube) KociembaScramble() string {
@@ -372,7 +379,9 @@ func (c *Cube) CalibsDebugString() string {
 	return s
 }
 
-func (c *Cube) Apply(moves []string, printStep bool) error {
+// Apply applys the solution and output the physical movements.
+func (c *Cube) Apply(moves []string, printStep bool) ([]string, error) {
+	pMoves := []string{}
 	for i := range moves {
 		m := Move(strings.TrimSpace(moves[i]))
 		if len(m) == 0 {
@@ -381,16 +390,18 @@ func (c *Cube) Apply(moves []string, printStep bool) error {
 		if *verbose {
 			fmt.Printf("calibs: %s\n", c.CalibsDebugString())
 		}
-		if err := c.Rotate(m); err != nil {
+		s, err := c.Rotate(m)
+		if err != nil {
 			log.Printf("ERROR: Rotate(%s) error: %v", string(m), err)
-			return err
+			return nil, err
 		}
+		pMoves = append(pMoves, s...)
 		if printStep {
-			fmt.Printf("Step[%d]: newMove=%s\n", i+1, m)
+			fmt.Printf("Step[%d]: newMove=%s %v\n", i+1, m, s)
 			c.Print()
 		}
 	}
-	return nil
+	return pMoves, nil
 }
 
 func (c *Cube) SetFace(code byte, face *Face) {
@@ -529,18 +540,19 @@ func httpCube(w http.ResponseWriter, req *http.Request) {
 
 	steps := solve(c)
 	solution := fmt.Sprintf("step=%d: %s", len(steps), strings.Join(steps, " "))
-	fmt.Printf("SOLUTION: %s\n", solution)
-	w.Write([]byte(fmt.Sprintf("OK: %s", solution)))
+	log.Printf("INFO: solution: %s\n", solution)
 
-	if err := c.Apply(steps, *verbose); err != nil {
+	moves, err := c.Apply(steps, *verbose)
+	if err != nil {
 		fmt.Printf("ERROR: Apply(%v) error: %v", steps, err)
 		return
 	}
+	w.Write([]byte(fmt.Sprintf("OK: %s %v", solution, moves)))
 	if !*verbose {
 		c.Print()
 	}
 
-	log.Printf("SUCCEEDED: %s", solution)
+	log.Printf("SUCCEEDED: move: %v", moves)
 }
 
 func main() {
